@@ -1091,6 +1091,22 @@ url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 reference = "tuna"
 
 [[package]]
+name = "opuslib"
+version = "3.0.1"
+description = "Python bindings to the libopus, IETF low-delay audio codec"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "opuslib-3.0.1.tar.gz", hash = "sha256:2cb045e5b03e7fc50dfefe431e3404dddddbd8f5961c10c51e32dfb69a044c97"},
+]
+
+[package.source]
+type = "legacy"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+reference = "tuna"
+
+[[package]]
 name = "packaging"
 version = "25.0"
 description = "Core utilities for Python packages"
@@ -1884,6 +1900,30 @@ url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 reference = "tuna"
 
 [[package]]
+name = "uvicorn"
+version = "0.35.0"
+description = "The lightning-fast ASGI server."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "uvicorn-0.35.0-py3-none-any.whl", hash = "sha256:197535216b25ff9b785e29a0b79199f55222193d47f820816e7da751e9bc8d4a"},
+    {file = "uvicorn-0.35.0.tar.gz", hash = "sha256:bc662f087f7cf2ce11a1d7fd70b90c9f98ef2e2831556dd078d131b96cc94a01"},
+]
+
+[package.dependencies]
+click = ">=7.0"
+h11 = ">=0.8"
+
+[package.extras]
+standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "uvloop (>=0.15.1) ; sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\"", "watchfiles (>=0.13)", "websockets (>=10.4)"]
+
+[package.source]
+type = "legacy"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+reference = "tuna"
+
+[[package]]
 name = "websockets"
 version = "15.0.1"
 description = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
@@ -1970,4 +2010,4 @@ reference = "tuna"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "6328233f6352fbfe169a4220218e5a2dcf85aeeceab7c9791d47fcc780066195"
+content-hash = "7cd166f7884bdc087a6856669c8570a18a34bfd665299027687a9e28040e3cf3"
