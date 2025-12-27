@@ -8,7 +8,8 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock README.md ./
 
 # 安装依赖
-RUN mkdir -p src/xiaozhi_nexus && \
+RUN apt install -y libopus0 libopus-dev && \
+    mkdir -p src/xiaozhi_nexus && \
     touch src/xiaozhi_nexus/__init__.py && \
     poetry install --no-root
 
