@@ -8,7 +8,7 @@ from typing import Callable
 import numpy as np
 
 from xiaozhi_nexus.audio.opus import OpusEncoder
-from xiaozhi_nexus.stubs.asr import StreamIASRnferencer
+from xiaozhi_nexus.inferencers.stream_asr import OpenAIRealtimeASRInferencer
 from xiaozhi_nexus.stubs.tts import SineWaveTTS
 
 
@@ -16,7 +16,7 @@ from xiaozhi_nexus.stubs.tts import SineWaveTTS
 class StreamSession:
     publish_json: Callable[[dict], None]
     publish_bytes: Callable[[bytes], None]
-    inferencer: StreamIASRnferencer
+    inferencer: OpenAIRealtimeASRInferencer
     tts: SineWaveTTS
     encoder: OpusEncoder
     input_maxsize: int = 200
@@ -66,20 +66,17 @@ class StreamSession:
             yield item
 
     def _worker(self) -> None:
-        last_transcript: str | None = None
-        for transcript in self.inferencer(self._audio_iter()):
+        for text_chunk in self.inferencer(self._audio_iter()):
             if not self._running.is_set():
                 break
 
-            self.publish_json({"type": "stt", "text": transcript})
-            token = transcript.split()[-1] if transcript else ""
+            # 每次返回的是独立的文本块
+            self.publish_json({"type": "stt", "text": text_chunk})
 
-            self.publish_json({"type": "tts", "state": "start", "text": token})
-            for pcm in self.tts.synthesize(token):
+            self.publish_json({"type": "tts", "state": "start", "text": text_chunk})
+            for pcm in self.tts.synthesize(text_chunk):
                 for packet in self.encoder.encode_pcm_float32(pcm):
                     self.publish_bytes(packet)
             self.publish_json({"type": "tts", "state": "stop"})
 
-            if transcript != last_transcript:
-                self.publish_json({"type": "llm", "emotion": "neutral"})
-                last_transcript = transcript
+            self.publish_json({"type": "llm", "emotion": "neutral"})

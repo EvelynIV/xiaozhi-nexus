@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from xiaozhi_nexus.audio.opus import OpusDecoder, OpusEncoder
 from xiaozhi_nexus.runtime.session import StreamSession
-from xiaozhi_nexus.stubs.asr import StreamIASRnferencer
+from xiaozhi_nexus.inferencers.stream_asr import OpenAIRealtimeASRInferencer
 from xiaozhi_nexus.stubs.tts import SineWaveTTS
 
 router = APIRouter()
@@ -130,8 +130,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             session = StreamSession(
                                 publish_json=publish_json,
                                 publish_bytes=publish_bytes,
-                                inferencer=StreamIASRnferencer(
-                                    sample_rate=audio_params.sample_rate
+                                inferencer=OpenAIRealtimeASRInferencer(
+                                    sample_rate=audio_params.sample_rate,
+                                    verify_ssl=False,
                                 ),
                                 tts=SineWaveTTS(sample_rate=encoder.sample_rate),
                                 encoder=encoder,
