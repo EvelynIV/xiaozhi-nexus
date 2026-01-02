@@ -210,8 +210,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     state = payload.get("state")
                     if state == "start":
                         listening = True
-                        # 如果已有 session 且正在运行，触发中断（用户打断）
                         # Ensure an existing session is running
+                        if session is not None:
                             session.start()
                         else:
                             # 创建新的 session
