@@ -13,12 +13,23 @@ logger = logging.getLogger(__name__)
 
 from xiaozhi_nexus.audio.opus import OpusEncoder
 from xiaozhi_nexus.inferencers.stream_asr import OpenAIRealtimeASRInferencer
+from xiaozhi_nexus.inferencers.stream_asr.stub import get_is_speech
 from xiaozhi_nexus.inferencers.chat import OpenAIChatInferencer
 from xiaozhi_nexus.inferencers.tts import OpenAITTSInferencer
 from xiaozhi_nexus.inferencers.tts.utils import (
     clean_text_for_tts,
     split_text_by_punctuation,
 )
+
+
+@dataclass
+class SessionState:
+    tts_active: bool = False
+    user_speaking: bool = False
+
+    @property
+    def idle(self) -> bool:
+        return (not self.tts_active) and (not self.user_speaking)
 
 
 @dataclass
@@ -42,6 +53,7 @@ class StreamSession:
     allow_interrupt: bool = True  # 是否允许用户打断
     audio_send_delay_ms: float = 15.0  # 每个音频包发送后的延时（毫秒），用于控制发送速度接近实时
     tts_split_by_punctuation: bool = True  # 是否按标点符号分段进行 TTS 合成
+    clear_outgoing_bytes: Optional[Callable[[], None]] = None
 
     # 内部状态
     _audio_q: queue.Queue[np.ndarray | None] = field(init=False, repr=False)
@@ -52,6 +64,7 @@ class StreamSession:
     _interrupted: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False
     )
+    state: SessionState = field(default_factory=SessionState, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._audio_q = queue.Queue(maxsize=self.input_maxsize)
@@ -61,12 +74,14 @@ class StreamSession:
             return
         self._running.set()
         self._interrupted.clear()
+        self.state.tts_active = False
+        self.state.user_speaking = False
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._running.clear()
-        self._interrupted.set()
+        self._abort_generation()
         while True:
             try:
                 self._audio_q.put(None, timeout=0.05)
@@ -109,11 +124,37 @@ class StreamSession:
             item = self._audio_q.get()
             if item is None:
                 break
+            self._update_user_speaking(item)
             yield item
 
     def _is_interrupted(self) -> bool:
         """检查是否被中断"""
         return self._interrupted.is_set() or not self._running.is_set()
+
+    def _clear_audio_queue(self) -> None:
+        try:
+            while True:
+                self._audio_q.get_nowait()
+        except queue.Empty:
+            pass
+
+    def _abort_generation(self) -> None:
+        if not self.allow_interrupt:
+            return
+        self._interrupted.set()
+        self._clear_audio_queue()
+        if self.clear_outgoing_bytes:
+            self.clear_outgoing_bytes()
+
+    def _update_user_speaking(self, pcm_f32: np.ndarray) -> None:
+        is_speech = get_is_speech(pcm_f32)
+        if is_speech is None:
+            return
+        prev_speaking = self.state.user_speaking
+        self.state.user_speaking = is_speech
+        if is_speech and not prev_speaking and self.state.tts_active:
+            logger.warning("Barge-in detected by VAD")
+            self._abort_generation()
 
     def _worker(self) -> None:
         for user_text in self.asr_inferencer(self._audio_iter()):
@@ -191,6 +232,7 @@ class StreamSession:
         text = clean_text_for_tts(text)
 
         logger.info(f"TTS start for text: {text[:50]}...")
+        self.state.tts_active = True
         self.publish_json({"type": "tts", "state": "start"})
 
         try:
@@ -245,3 +287,5 @@ class StreamSession:
 
         except Exception as e:
             self.publish_json({"type": "tts", "state": "error", "error": str(e)})
+        finally:
+            self.state.tts_active = False
