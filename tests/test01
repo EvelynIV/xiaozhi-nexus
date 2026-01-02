@@ -1,0 +1,56 @@
+User Interrupt Sequence Diagram (mermaid)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant WS as API:WebSocket
+    participant Session as StreamSession
+    participant ASR
+    participant LLM
+    participant TTS
+
+    Client->>WS: connect
+    Client->>WS: {"type":"hello", ...}
+    WS-->>Client: {"type":"hello","transport":"websocket","version":1}
+
+    Client->>WS: {"type":"listen","state":"start"}
+    alt session exists
+        WS->>Session: interrupt() if allow_interrupt
+        Session->>Session: _interrupted.set()
+    else no session
+        WS->>Session: create + start()
+        Session->>Session: worker thread start
+    end
+
+    loop audio frames
+        Client->>WS: bytes(opus)
+        WS->>Session: push_audio(pcm_f32)
+        Session->>ASR: audio_iter()
+        ASR-->>Session: user_text
+        Session-->>Client: {"type":"stt","text":user_text}
+        Session->>LLM: stream(user_text)
+        LLM-->>Session: chunk
+        Session->>Session: check _is_interrupted
+        alt user interrupt during LLM
+            Session-->>Client: {"type":"llm","state":"stop","interrupted":true}
+            Session->>Session: clear_interrupt()
+            note over Session: skip TTS and wait for new input
+        else no interrupt
+            Session-->>Client: {"type":"llm","emotion":"neutral"}
+            Session->>TTS: synthesize(response_text)
+            Session-->>Client: {"type":"tts","state":"start"}
+            TTS-->>Session: pcm chunks
+            Session->>Session: encode + send audio packets
+            alt user interrupt during TTS
+                Session-->>Client: {"type":"tts","state":"stop","interrupted":true}
+                Session->>Session: clear_interrupt()
+            else complete
+                Session-->>Client: {"type":"tts","state":"stop"}
+            end
+        end
+    end
+
+    Client->>WS: {"type":"listen","state":"stop"}
+    WS->>Session: stop()
+    Session->>Session: _running.clear(), _interrupted.set()
+```

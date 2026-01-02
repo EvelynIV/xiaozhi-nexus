@@ -1,0 +1,86 @@
+sequenceDiagram
+    participant Client
+    participant WS as API:WebSocket
+    participant Session as StreamSession
+    participant VAD
+    participant ASR
+    participant LLM
+    participant TTS
+
+    Client->>WS: connect
+    Client->>WS: {"type":"hello", ...}
+    WS-->>Client: {"type":"hello","transport":"websocket","version":1}
+
+    Note over Client,WS: Real-time streaming (no push-to-talk / no wake word)
+    Note over WS,Session: Session exists per connection/device
+
+    alt session exists
+        WS->>Session: ensure_session()
+    else no session
+        WS->>Session: create + start()
+        Session->>Session: worker task/thread start
+    end
+
+    loop audio frames (continuous)
+        Client->>WS: bytes(opus mic audio)
+        WS->>Session: push_audio(pcm_f32)
+
+        par VAD in parallel
+            Session->>VAD: vad(pcm_f32 chunk)
+            VAD-->>Session: is_speech (t/f), confidence, ts
+            Session->>Session: update user_speaking
+            alt speech_start && tts_active
+                Note over Session: Barge-in detected on server
+                Session->>Session: _interrupted.set()
+                Session->>TTS: cancel/abort current synth (best-effort)
+                Session->>Session: stop sending queued tts audio
+                Session-->>Client: {"type":"tts","state":"stop","interrupted":true,"reason":"barge_in"}
+                Session->>Session: tts_active=false
+                Session->>Session: clear_interrupt_latch()
+                Note over Session: proceed to next step immediately
+            end
+        and ASR in parallel
+            Session->>ASR: audio_iter()
+            ASR-->>Session: user_text (partial/final)
+            Session-->>Client: {"type":"stt","text":user_text}
+        end
+
+        Note over Session: Decide when to call LLM (e.g., on end-of-utterance)
+        Session->>LLM: stream(user_text)
+        loop LLM chunks
+            LLM-->>Session: chunk
+            Session->>Session: check _is_interrupted
+            alt interrupted during LLM
+                Session-->>Client: {"type":"llm","state":"stop","interrupted":true,"reason":"barge_in"}
+                Session->>Session: clear_interrupt()
+                Note over Session: skip TTS and wait for new input
+            else no interrupt
+                Session-->>Client: {"type":"llm","chunk":chunk}
+            end
+        end
+
+        alt not interrupted and response ready
+            Session-->>Client: {"type":"tts","state":"start"}
+            Session->>Session: tts_active=true
+            Session->>TTS: synthesize(response_text)
+            loop tts pcm chunks
+                TTS-->>Session: pcm chunk
+                Session->>Session: encode + send audio packet
+                Session->>Session: check _is_interrupted
+                alt interrupted during TTS
+                    Session-->>Client: {"type":"tts","state":"stop","interrupted":true,"reason":"barge_in"}
+                    Session->>Session: tts_active=false
+                    Session->>Session: clear_interrupt()
+                    Note over Session: proceed to next step immediately
+                end
+            end
+            alt complete and not interrupted
+                Session-->>Client: {"type":"tts","state":"stop"}
+                Session->>Session: tts_active=false
+            end
+        end
+    end
+
+    Client->>WS: {"type":"listen","state":"stop"} (optional)
+    WS->>Session: stop()
+    Session->>Session: _running.clear(), _interrupted.set()

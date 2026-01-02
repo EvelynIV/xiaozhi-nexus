@@ -159,6 +159,26 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     def publish_bytes(payload: bytes) -> None:
         loop.call_soon_threadsafe(_enqueue, Outgoing(kind="bytes", payload=payload))
 
+    def clear_outgoing_bytes() -> None:
+        def _drain_bytes() -> None:
+            kept: list[Outgoing] = []
+            try:
+                while True:
+                    item = outgoing.get_nowait()
+                    if item.kind == "bytes":
+                        continue
+                    kept.append(item)
+            except asyncio.QueueEmpty:
+                pass
+            for item in kept:
+                try:
+                    outgoing.put_nowait(item)
+                except asyncio.QueueFull:
+                    logging.warning("Outgoing queue full while requeueing control messages")
+                    break
+
+        loop.call_soon_threadsafe(_drain_bytes)
+
     try:
         while True:
             message = await websocket.receive()
@@ -190,9 +210,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     state = payload.get("state")
                     if state == "start":
                         listening = True
-                        # 如果已有 session 且正在运行，触发中断（用户打断）
+                        # Ensure an existing session is running
                         if session is not None:
-                            session.interrupt()
+                            session.start()
                         else:
                             # 创建新的 session
                             if not decoder or not audio_params:
@@ -210,6 +230,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                                 allow_interrupt=cfg.system.allow_interrupt,
                                 audio_send_delay_ms=cfg.tts.audio_send_delay_ms,
                                 tts_split_by_punctuation=cfg.tts.split_by_punctuation,
+                                clear_outgoing_bytes=clear_outgoing_bytes,
                             )
                             session.start()
                         continue
